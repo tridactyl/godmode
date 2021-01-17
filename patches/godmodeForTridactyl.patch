@@ -1,0 +1,20 @@
+diff --git a/src/manifest.json b/src/manifest.json
+index 4666263a..fcd9655c 100644
+--- a/src/manifest.json
++++ b/src/manifest.json
+@@ -97,6 +97,8 @@
+         "webNavigation",
+         "webRequest",
+         "webRequestBlocking",
++        "about:*",
++        "mozillaAddons",
+         "<all_urls>"
+     ],
+     "applications": {
+@@ -123,4 +125,4 @@
+     "omnibox": {
+         "keyword": "tri"
+     }
+-}
+\ No newline at end of file
++}

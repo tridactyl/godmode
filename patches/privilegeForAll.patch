@@ -1,0 +1,18 @@
+diff --git a/modules/Extension.jsm b/modules/Extension.jsm
+index 302bb32..e9f60cb 100644
+--- a/modules/Extension.jsm
++++ b/modules/Extension.jsm
+@@ -2121,12 +2121,7 @@ class Extension extends ExtensionData {
+   }
+ 
+   get isPrivileged() {
+-    return (
+-      this.addonData.signedState === AddonManager.SIGNEDSTATE_PRIVILEGED ||
+-      this.addonData.signedState === AddonManager.SIGNEDSTATE_SYSTEM ||
+-      this.addonData.builtIn ||
+-      (AddonSettings.EXPERIMENTS_ENABLED && this.addonData.temporarilyInstalled)
+-    );
++    return true;
+   }
+ 
+   get experimentsAllowed() {
