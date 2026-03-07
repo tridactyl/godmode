@@ -6,4 +6,4 @@ cd ~/projects/tridactyl
 
 scripts/sign nosignstable
 
-install -Dm644 web-ext-artifacts/tridactyl*xpi /usr/lib/firefox/browser/extensions/tridactyl.vim@cmcaine.co.uk.xpi
+sudo install -Dm644 web-ext-artifacts/tridactyl*xpi /usr/lib/firefox-developer-edition/browser/extensions/tridactyl.vim@cmcaine.co.uk.xpi
