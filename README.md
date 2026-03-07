@@ -14,4 +14,14 @@ Mozilla thinks patches like these are an extreme security risk. I do not. You wo
 
 ---
 
+patch using
+
+```
+patch -p1 workingdir/raw/modules/Extension.sys.mjs patches/privilegeForAll.patch
+```
+
+etc
+
+---
+
 The logo uses elements designed by Jake Beazley, Vecteezy.com, and David A Se, combined with apologies by Oliver Blanthorn.
