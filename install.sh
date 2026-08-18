@@ -25,7 +25,8 @@ require_command flock
 require_command stat
 check_firefox_installation
 require_firefox_stopped
-[ -f "$PREF_SOURCE" ] && [ -f "$CFG_SOURCE" ] || die "AutoConfig source files are missing"
+[ -f "$PREF_SOURCE" ] && [ -f "$CFG_SOURCE" ] && [ -f "$ACTOR_SOURCE" ] ||
+    die "AutoConfig source files are missing"
 [ -w "$FIREFOX_DIR" ] && [ -w "$PREF_DIR" ] || die "installation is not writable; run this script with sudo"
 check_install_directories
 check_install_identity
@@ -43,6 +44,7 @@ begin_transaction
 CFG_TMP="$TRANSACTION_DIR/cfg.new"
 PREF_TMP="$TRANSACTION_DIR/pref.new"
 STATE_TMP="$TRANSACTION_DIR/state.new"
+ACTOR_TMP="$TRANSACTION_DIR/actor.new"
 SUCCESS=0
 
 cleanup() {
@@ -60,7 +62,8 @@ trap 'exit 1' 1 2 3 15
 
 install -m 0644 "$CFG_SOURCE" "$CFG_TMP"
 install -m 0644 "$PREF_SOURCE" "$PREF_TMP"
-state_for_files "$CFG_TMP" "$PREF_TMP" > "$STATE_TMP"
+install -m 0644 "$ACTOR_SOURCE" "$ACTOR_TMP"
+state_for_files "$CFG_TMP" "$PREF_TMP" "$ACTOR_TMP" > "$STATE_TMP"
 chmod 0644 "$STATE_TMP"
 
 backup_transaction_target cfg "$CFG_TARGET"
@@ -69,11 +72,15 @@ mv -f "$CFG_TMP" "$CFG_TARGET"
 backup_transaction_target pref "$PREF_TARGET"
 mv -f "$PREF_TMP" "$PREF_TARGET"
 
+backup_transaction_target actor "$ACTOR_TARGET"
+mv -f "$ACTOR_TMP" "$ACTOR_TARGET"
+
 backup_transaction_target state "$STATE_TARGET"
 mv -f "$STATE_TMP" "$STATE_TARGET"
 
 cmp -s "$CFG_SOURCE" "$CFG_TARGET" || die "failed to verify $CFG_TARGET"
 cmp -s "$PREF_SOURCE" "$PREF_TARGET" || die "failed to verify $PREF_TARGET"
+cmp -s "$ACTOR_SOURCE" "$ACTOR_TARGET" || die "failed to verify $ACTOR_TARGET"
 state_matches_complete_install || die "failed to verify $STATE_TARGET"
 installed_files_are_safe || die "installed files have unsafe metadata"
 

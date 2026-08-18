@@ -20,11 +20,89 @@ const internalMatches = [
 ];
 const stableId = "tridactyl.vim@cmcaine.co.uk";
 
-function createHarness({ firefoxVersion = "999.0a1" } = {}) {
+function createHarness({
+  firefoxVersion = "999.0a1",
+  keyHandoff = false,
+  shutdownHook = true,
+} = {}) {
+  const actorQueries = [];
+  const actorRegistrations = [];
+  const actorResults = [];
   const cacheClears = [];
   const cacheWrites = [];
   const errors = [];
+  const keyListeners = [];
   const logs = [];
+  const observers = [];
+  const resourceSubstitutions = [];
+
+  const actor = {
+    sendQuery(name, data) {
+      actorQueries.push({ name, data });
+      const result = actorResults.shift();
+      return result instanceof Error
+        ? Promise.reject(result)
+        : Promise.resolve(result || { delivered: true });
+    },
+  };
+  const selectedBrowser = {
+    focusCount: 0,
+    browsingContext: {
+      currentWindowGlobal: {
+        getActor() {
+          return actor;
+        },
+      },
+    },
+    focus() {
+      this.focusCount += 1;
+      browserWindow.document.activeElement = this;
+    },
+  };
+  const browserWindow = {
+    closed: false,
+    document: {
+      activeElement: {},
+      documentElement: {
+        getAttribute(name) {
+          return name === "windowtype" ? "navigator:browser" : null;
+        },
+      },
+      readyState: "complete",
+    },
+    gBrowser: { selectedBrowser },
+    addEventListener(type, listener) {
+      if (type === "keydown") {
+        keyListeners.push(listener);
+      }
+    },
+  };
+
+  function dispatchChromeKey(overrides = {}) {
+    const event = {
+      altKey: false,
+      code: "KeyJ",
+      ctrlKey: false,
+      isComposing: false,
+      key: "j",
+      metaKey: false,
+      repeat: false,
+      shiftKey: false,
+      defaultPrevented: false,
+      propagationStopped: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+      stopImmediatePropagation() {
+        this.propagationStopped = true;
+      },
+      ...overrides,
+    };
+    for (const listener of keyListeners) {
+      listener(event);
+    }
+    return event;
+  }
 
   function patternSet(patterns) {
     return { patterns: patterns.map(pattern => ({ pattern })) };
@@ -46,6 +124,7 @@ function createHarness({ firefoxVersion = "999.0a1" } = {}) {
       id,
       {
         loadError = false,
+        startupGate = null,
         startupError = false,
         temporary = false,
         type = "extension",
@@ -54,6 +133,7 @@ function createHarness({ firefoxVersion = "999.0a1" } = {}) {
       this.id = id;
       this.addonData = { type };
       this.loadError = loadError;
+      this.startupGate = startupGate;
       this.startupError = startupError;
       this.temporarilyInstalled = temporary;
       this.ignoreQuarantine = false;
@@ -64,6 +144,7 @@ function createHarness({ firefoxVersion = "999.0a1" } = {}) {
     async startup() {
       await this.loadManifest();
       this._setupStartupPermissions();
+      await this.startupGate;
       if (this.startupError) {
         throw new Error("startup failed");
       }
@@ -96,6 +177,10 @@ function createHarness({ firefoxVersion = "999.0a1" } = {}) {
       this.setupPrivilege = this.isPrivileged;
     }
 
+    async shutdown() {
+      return this;
+    }
+
     cachePermissions() {
       return StartupCache.manifests.set([this.id, "1", "en-US"], {
         permissions: this.permissions,
@@ -105,6 +190,9 @@ function createHarness({ firefoxVersion = "999.0a1" } = {}) {
       });
     }
   }
+  if (!shutdownHook) {
+    delete Extension.prototype.shutdown;
+  }
 
   const modules = new Map([
     ["resource://gre/modules/Services.sys.mjs", {
@@ -113,6 +201,57 @@ function createHarness({ firefoxVersion = "999.0a1" } = {}) {
         console: {
           logStringMessage(message) {
             logs.push(message);
+          },
+        },
+        dirsvc: {
+          get() {
+            return {
+              path: "/firefox",
+              append(name) {
+                this.path += `/${name}`;
+              },
+              exists() {
+                return true;
+              },
+              isFile() {
+                return true;
+              },
+              get parent() {
+                return { path: "/firefox" };
+              },
+            };
+          },
+        },
+        io: {
+          getProtocolHandler() {
+            return {
+              QueryInterface() {
+                return this;
+              },
+              setSubstitutionWithFlags(...args) {
+                resourceSubstitutions.push(args);
+              },
+            };
+          },
+          newFileURI(file) {
+            return { spec: `file://${file.path}/` };
+          },
+        },
+        obs: {
+          addObserver(callback, topic) {
+            observers.push({ callback, topic });
+          },
+        },
+        prefs: {
+          getBoolPref(name, fallback) {
+            assert.equal(name, "tridactyl.godmode.chrome_key_handoff");
+            return keyHandoff ?? fallback;
+          },
+        },
+        wm: {
+          getEnumerator(type) {
+            assert.equal(type, "navigator:browser");
+            return [browserWindow];
           },
         },
       },
@@ -146,8 +285,15 @@ function createHarness({ firefoxVersion = "999.0a1" } = {}) {
             assert(modules.has(uri), `Unexpected module import: ${uri}`);
             return modules.get(uri);
           },
+          registerWindowActor(name, options) {
+            actorRegistrations.push({ name, options });
+          },
         },
         Components: {
+          interfaces: {
+            nsIFile: {},
+            nsISubstitutingProtocolHandler: {},
+          },
           utils: {
             reportError(error) {
               errors.push(String(error));
@@ -160,12 +306,20 @@ function createHarness({ firefoxVersion = "999.0a1" } = {}) {
   }
 
   return {
+    actorQueries,
+    actorRegistrations,
+    actorResults,
+    browserWindow,
     cacheClears,
     cacheWrites,
+    dispatchChromeKey,
     errors,
     evaluate,
     Extension,
     logs,
+    observers,
+    resourceSubstitutions,
+    selectedBrowser,
   };
 }
 
@@ -241,6 +395,136 @@ async function main() {
       message.includes(`enabled internal-page access for ${stableId}`)
     )
   );
+  assert.deepEqual(harness.actorRegistrations, []);
+
+  const noShutdown = createHarness({ keyHandoff: true, shutdownHook: false });
+  noShutdown.evaluate();
+  const noShutdownTridactyl = await new noShutdown.Extension(stableId).startup();
+  assert.equal(noShutdownTridactyl.isPrivileged, true);
+  assert.deepEqual(noShutdown.actorRegistrations, []);
+  assert(noShutdown.errors.some(error => error.includes("shutdown hooks")));
+
+  const racing = createHarness({ keyHandoff: true });
+  racing.evaluate();
+  let releaseStartup;
+  const startupGate = new Promise(resolve => {
+    releaseStartup = resolve;
+  });
+  const racingTridactyl = new racing.Extension(stableId, { startupGate });
+  const interruptedStartup = racingTridactyl.startup();
+  await racingTridactyl.shutdown();
+  releaseStartup();
+  await interruptedStartup;
+  assert.deepEqual(racing.actorRegistrations, []);
+  await racingTridactyl.startup();
+  assert.equal(racing.actorRegistrations.length, 1);
+
+  const handoff = createHarness({ keyHandoff: true });
+  handoff.evaluate();
+  await new handoff.Extension("other@example.com").startup();
+  assert.deepEqual(handoff.actorRegistrations, []);
+  const handoffStable = new handoff.Extension(stableId);
+  const handoffBeta = new handoff.Extension(
+    "tridactyl.vim.betas@cmcaine.co.uk"
+  );
+  await handoffStable.startup();
+  await handoffBeta.startup();
+  assert.equal(handoff.actorRegistrations.length, 1);
+  assert.equal(
+    handoff.actorRegistrations[0].name,
+    "TridactylGodmodeKeyHandoff"
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(handoff.actorRegistrations[0].options)), {
+    child: {
+      esModuleURI:
+        "resource://tridactyl-godmode/tridactyl-godmode-key-handoff-child.sys.mjs",
+    },
+    allFrames: false,
+    safeForUntrustedWebProcess: true,
+  });
+  assert.equal(handoff.resourceSubstitutions.length, 1);
+  assert.equal(handoff.observers[0].topic, "domwindowopened");
+
+  for (const key of ["Control", "CapsLock", "NumLock", "ScrollLock"]) {
+    const modifier = handoff.dispatchChromeKey({ key, code: key });
+    assert.equal(modifier.defaultPrevented, false);
+  }
+  assert.equal(handoff.selectedBrowser.focusCount, 0);
+  const relayed = handoff.dispatchChromeKey({ ctrlKey: true });
+  assert.equal(relayed.defaultPrevented, true);
+  assert.equal(relayed.propagationStopped, true);
+  assert.equal(handoff.selectedBrowser.focusCount, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(handoff.actorQueries)), [
+    {
+      name: "TridactylGodmodeKeyHandoff:Keydown",
+      data: {
+        key: "j",
+        code: "KeyJ",
+        repeat: false,
+        ctrlKey: true,
+        shiftKey: false,
+        altKey: false,
+        metaKey: false,
+      },
+    },
+  ]);
+
+  handoff.browserWindow.document.activeElement = {};
+  const toggleOff = handoff.dispatchChromeKey({
+    code: "F12",
+    key: "F12",
+    ctrlKey: true,
+    shiftKey: true,
+  });
+  assert.equal(toggleOff.defaultPrevented, true);
+  const ignored = handoff.dispatchChromeKey({ key: "k", code: "KeyK" });
+  assert.equal(ignored.defaultPrevented, false);
+  assert.equal(handoff.actorQueries.length, 1);
+  handoff.dispatchChromeKey({
+    code: "F12",
+    key: "F12",
+    ctrlKey: true,
+    shiftKey: true,
+  });
+  handoff.dispatchChromeKey({
+    code: "F12",
+    key: "F12",
+    ctrlKey: true,
+    shiftKey: true,
+    repeat: true,
+  });
+  const composing = handoff.dispatchChromeKey({ isComposing: true });
+  assert.equal(composing.defaultPrevented, false);
+  assert.equal(handoff.actorQueries.length, 1);
+
+  const navigation = new Error("navigated");
+  navigation.name = "AbortError";
+  handoff.actorResults.push(navigation);
+  handoff.browserWindow.document.activeElement = {};
+  handoff.dispatchChromeKey({ key: "n", code: "KeyN" });
+  await Promise.resolve();
+  handoff.browserWindow.document.activeElement = {};
+  const afterNavigation = handoff.dispatchChromeKey({ key: "m", code: "KeyM" });
+  assert.equal(afterNavigation.defaultPrevented, true);
+  assert.equal(handoff.actorQueries.length, 3);
+
+  handoff.actorResults.push({ delivered: false });
+  handoff.browserWindow.document.activeElement = {};
+  handoff.dispatchChromeKey({ key: "x", code: "KeyX" });
+  await Promise.resolve();
+  handoff.browserWindow.document.activeElement = {};
+  assert.equal(handoff.dispatchChromeKey().defaultPrevented, false);
+  handoff.dispatchChromeKey({
+    code: "F12",
+    key: "F12",
+    ctrlKey: true,
+    shiftKey: true,
+  });
+
+  await handoffStable.shutdown();
+  await handoffBeta.shutdown();
+  handoff.browserWindow.document.activeElement = {};
+  assert.equal(handoff.dispatchChromeKey().defaultPrevented, false);
 
   process.stdout.write("AutoConfig behavior tests passed.\n");
 }

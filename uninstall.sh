@@ -34,6 +34,10 @@ rm -f "$PREF_TARGET"
 [ ! -e "$PREF_TARGET" ] || die "failed to remove $PREF_TARGET"
 rm -f "$CFG_TARGET"
 [ ! -e "$CFG_TARGET" ] || die "failed to remove $CFG_TARGET"
+if should_remove_actor; then
+    rm -f "$ACTOR_TARGET"
+    [ ! -e "$ACTOR_TARGET" ] || die "failed to remove $ACTOR_TARGET"
+fi
 rm -f "$STATE_TARGET"
 [ ! -e "$STATE_TARGET" ] || die "failed to remove $STATE_TARGET"
 rm -f "$LOCK_TARGET"

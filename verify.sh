@@ -18,7 +18,9 @@ if [ "$#" -eq 0 ]; then
     require_command node
     node --check < "$REPO_DIR/autoconfig/tridactyl-godmode.cfg"
     node --check < "$REPO_DIR/autoconfig/defaults/pref/tridactyl-godmode.js"
+    node --check "$REPO_DIR/autoconfig/tridactyl-godmode-key-handoff-child.sys.mjs"
     node "$REPO_DIR/tests/autoconfig.test.js"
+    node "$REPO_DIR/tests/key-handoff-actor.test.mjs"
     sh "$REPO_DIR/tests/lifecycle.sh"
     sh -n "$REPO_DIR/scripts/common.sh"
     sh -n "$REPO_DIR/tests/lifecycle.sh"

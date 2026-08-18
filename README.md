@@ -12,6 +12,11 @@ runs with browser-process privileges, and Tridactyl gains DOM access to pages
 ordinary extensions cannot touch. Mozilla considers this dangerous. Use it
 only on a Firefox installation and machine you control.
 
+The optional chrome key handoff is more invasive: it sends a trusted copy of a
+key pressed in Firefox UI into the selected page. Page JavaScript can observe
+that key and may receive user activation. Do not enable it unless you accept
+that risk, especially on untrusted pages.
+
 ## Supported setup
 
 The default target is Firefox Developer Edition at:
@@ -67,6 +72,7 @@ The installed files are:
 ```text
 <firefox>/defaults/pref/tridactyl-godmode.js
 <firefox>/tridactyl-godmode.cfg
+<firefox>/tridactyl-godmode-key-handoff-child.sys.mjs
 <firefox>/tridactyl-godmode.state
 <firefox>/.tridactyl-godmode.lock
 ```
@@ -95,6 +101,33 @@ For an exact Tridactyl ID, the hook:
 
 The signed extension, ID, UUID, storage, and profile location stay unchanged.
 AMO updates retain Firefox's normal signature checks.
+
+## Optional key handoff
+
+Chrome-to-page key handoff is installed but disabled by default. To try it:
+
+1. Open `about:config`.
+2. Set `tridactyl.godmode.chrome_key_handoff` to `true`.
+3. Restart Firefox.
+
+After an official Tridactyl instance starts, a key pressed while focus is in
+the URL bar, tab strip, or other main browser chrome is consumed. Firefox
+focuses the selected tab and sends a trusted copy of that first `keydown` to
+the top-level document. Subsequent physical keys go directly to the page's
+restored focus and Tridactyl. Modifier-only keydowns remain in browser chrome,
+so a chord is handed off when its non-modifier key arrives.
+
+`Ctrl+Shift+F12` toggles handoff for the current window while browser chrome
+has focus. The toggle is not persistent; setting the preference to `false` and
+restarting disables the feature completely. Handoff also stops intercepting if
+the last targeted Tridactyl instance shuts down, and it disables itself for a
+window if the content actor fails.
+
+Composition, dead-key, `Process`, and AltGraph input is left in browser chrome
+because it cannot be reconstructed reliably. The relay synthesizes one trusted
+`keydown`, not native keyboard input, and does not recreate IME processing,
+`keypress`, text insertion, or transient keyboard state. The selected page can
+observe the relayed key and any physical keys typed after focus moves.
 
 ## Internal schemes
 
@@ -180,7 +213,8 @@ Node.js is needed only for these source checks, not for installation or
 installed-file verification. The checks cover JavaScript and shell syntax, a
 startup model for targeted privilege and cache sanitation, cross-realm Firefox
 objects, failure rollback, temporary and unrelated extension isolation, hook
-idempotence, transactional upgrades and crash recovery, conflict detection,
-unsafe-path rejection, and uninstall recovery.
+idempotence, optional key handoff and actor dispatch, transactional upgrades
+and legacy-state migration, crash recovery, conflict detection, unsafe-path
+rejection, and uninstall recovery.
 
 The logo uses elements designed by Jake Beazley, Vecteezy.com, and David A Se.

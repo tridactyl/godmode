@@ -14,6 +14,8 @@ set_firefox_paths() {
     PREF_TARGET="$PREF_DIR/tridactyl-godmode.js"
     CFG_SOURCE="$REPO_DIR/autoconfig/tridactyl-godmode.cfg"
     CFG_TARGET="$FIREFOX_DIR/tridactyl-godmode.cfg"
+    ACTOR_SOURCE="$REPO_DIR/autoconfig/tridactyl-godmode-key-handoff-child.sys.mjs"
+    ACTOR_TARGET="$FIREFOX_DIR/tridactyl-godmode-key-handoff-child.sys.mjs"
     STATE_TARGET="$FIREFOX_DIR/tridactyl-godmode.state"
     LOCK_TARGET="$FIREFOX_DIR/.tridactyl-godmode.lock"
     TRANSACTION_DIR="$FIREFOX_DIR/.tridactyl-godmode.transaction"
@@ -75,6 +77,7 @@ rollback_transaction() {
     failed=0
     restore_transaction_target cfg "$CFG_TARGET" || failed=1
     restore_transaction_target pref "$PREF_TARGET" || failed=1
+    restore_transaction_target actor "$ACTOR_TARGET" || failed=1
     restore_transaction_target state "$STATE_TARGET" || failed=1
     if [ "$failed" -ne 0 ]; then
         rm -f "$PREF_TARGET"
@@ -134,7 +137,9 @@ check_autoconfig_conflicts() {
 state_for_files() {
     cfg_state=$(cksum < "$1") || return 1
     pref_state=$(cksum < "$2") || return 1
-    printf 'format 1 0\ncfg %s\npref %s\n' "$cfg_state" "$pref_state"
+    actor_state=$(cksum < "$3") || return 1
+    printf 'format 1 1\ncfg %s\npref %s\nactor %s\n' \
+        "$cfg_state" "$pref_state" "$actor_state"
 }
 
 recorded_state() {
@@ -146,8 +151,16 @@ recorded_state() {
 
 state_file_is_valid() {
     [ -f "$STATE_TARGET" ] && [ ! -L "$STATE_TARGET" ] || return 1
-    [ "$(recorded_state format)" = "1 0" ] || return 1
-    recorded_state cfg >/dev/null && recorded_state pref >/dev/null
+    case "$(recorded_state format)" in
+        "1 0") recorded_state cfg >/dev/null && recorded_state pref >/dev/null ;;
+        "1 1") recorded_state cfg >/dev/null && recorded_state pref >/dev/null &&
+            recorded_state actor >/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
+state_tracks_actor() {
+    [ "$(recorded_state format)" = "1 1" ]
 }
 
 state_matches_file() {
@@ -159,11 +172,15 @@ state_matches_file() {
 state_matches_existing_targets() {
     state_file_is_valid &&
         state_matches_file cfg "$CFG_TARGET" &&
-        state_matches_file pref "$PREF_TARGET"
+        state_matches_file pref "$PREF_TARGET" &&
+        { ! state_tracks_actor || state_matches_file actor "$ACTOR_TARGET"; }
 }
 
 state_matches_complete_install() {
-    [ -f "$CFG_TARGET" ] && [ -f "$PREF_TARGET" ] &&
+    [ -f "$STATE_TARGET" ] && [ ! -L "$STATE_TARGET" ] &&
+        state_tracks_actor &&
+        [ -f "$CFG_TARGET" ] && [ -f "$PREF_TARGET" ] &&
+        [ -f "$ACTOR_TARGET" ] &&
         state_matches_existing_targets
 }
 
@@ -178,6 +195,7 @@ file_is_safely_installed() {
 installed_files_are_safe() {
     file_is_safely_installed "$CFG_TARGET" &&
         file_is_safely_installed "$PREF_TARGET" &&
+        file_is_safely_installed "$ACTOR_TARGET" &&
         file_is_safely_installed "$STATE_TARGET" &&
         [ -f "$LOCK_TARGET" ] &&
         [ ! -L "$LOCK_TARGET" ] &&
@@ -188,22 +206,28 @@ installed_files_are_safe() {
 check_untracked_target() {
     target=$1
     source=$2
-    if [ -e "$target" ] && ! cmp -s "$source" "$target"; then
-        die "$target exists without matching installation state"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        [ -f "$target" ] && [ ! -L "$target" ] &&
+            cmp -s "$source" "$target" ||
+            die "$target exists without matching installation state"
     fi
 }
 
 check_existing_install() {
-    if [ -e "$STATE_TARGET" ]; then
+    if [ -e "$STATE_TARGET" ] || [ -L "$STATE_TARGET" ]; then
         state_matches_existing_targets || die "installed Godmode files were modified"
+        if ! state_tracks_actor; then
+            check_untracked_target "$ACTOR_TARGET" "$ACTOR_SOURCE"
+        fi
     else
         check_untracked_target "$CFG_TARGET" "$CFG_SOURCE"
         check_untracked_target "$PREF_TARGET" "$PREF_SOURCE"
+        check_untracked_target "$ACTOR_TARGET" "$ACTOR_SOURCE"
     fi
 }
 
 check_existing_uninstall() {
-    if [ -e "$STATE_TARGET" ]; then
+    if [ -e "$STATE_TARGET" ] || [ -L "$STATE_TARGET" ]; then
         state_matches_existing_targets || die "installed Godmode files were modified"
     else
         check_untracked_target "$CFG_TARGET" "$CFG_SOURCE"
@@ -211,6 +235,12 @@ check_existing_uninstall() {
     fi
 }
 
+should_remove_actor() {
+    [ -e "$STATE_TARGET" ] && [ ! -L "$STATE_TARGET" ] && state_tracks_actor
+}
+
 current_payload_is_installed() {
-    cmp -s "$CFG_SOURCE" "$CFG_TARGET" && cmp -s "$PREF_SOURCE" "$PREF_TARGET"
+    cmp -s "$CFG_SOURCE" "$CFG_TARGET" &&
+        cmp -s "$PREF_SOURCE" "$PREF_TARGET" &&
+        cmp -s "$ACTOR_SOURCE" "$ACTOR_TARGET"
 }
